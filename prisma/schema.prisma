@@ -1,0 +1,202 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum ConversationType {
+  CHAT
+  IMAGE
+  VIDEO
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  DEVELOPER
+}
+
+enum RecordStatus {
+  PENDING
+  STREAMING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AssetKind {
+  CHAT_INPUT
+  IMAGE_REFERENCE
+  IMAGE_OUTPUT
+  IMAGE_MASK
+  VIDEO_REFERENCE
+  VIDEO_OUTPUT
+}
+
+enum ApiKind {
+  RESPONSES
+  IMAGE_GENERATION
+  IMAGE_EDIT
+  VIDEO_GENERATION
+  VIDEO_STATUS
+}
+
+model User {
+  id            String         @id @default(cuid())
+  email         String?        @unique @db.VarChar(191)
+  name          String         @default("Jimmy") @db.VarChar(191)
+  isDefault     Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  conversations Conversation[]
+
+  @@index([isDefault])
+}
+
+model Conversation {
+  id                     String           @id @default(cuid())
+  type                   ConversationType
+  title                  String           @default("新聊天") @db.VarChar(191)
+  userId                 String
+  providerConversationId String?          @db.VarChar(191)
+  activeAssetId          String?          @db.VarChar(191)
+  lastMessageAt          DateTime         @default(now())
+  deletedAt              DateTime?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  user                   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages               ChatMessage[]
+  imageTurns             ImageTurn[]
+  videoTurns             VideoTurn[]
+  assets                 Asset[]
+  apiLogs                ApiUsageLog[]
+
+  @@index([userId, type, deletedAt, lastMessageAt])
+  @@index([lastMessageAt])
+}
+
+model ChatMessage {
+  id                 String        @id @default(cuid())
+  conversationId     String
+  role               MessageRole
+  content            String?       @db.LongText
+  sequence           Int
+  status             RecordStatus  @default(COMPLETED)
+  attachments        Json?
+  providerResponseId String?       @db.VarChar(191)
+  previousResponseId String?       @db.VarChar(191)
+  rawResponse        Json?
+  errorMessage       String?       @db.Text
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  conversation       Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  apiLogs            ApiUsageLog[]
+
+  @@unique([conversationId, sequence])
+  @@index([conversationId, createdAt])
+  @@index([providerResponseId])
+}
+
+model ImageTurn {
+  id                String        @id @default(cuid())
+  conversationId    String
+  sequence          Int
+  prompt            String        @db.LongText
+  status            RecordStatus  @default(PENDING)
+  params            Json
+  referenceAssetIds Json?
+  outputAssetIds    Json?
+  baseAssetId       String?       @db.VarChar(191)
+  activeAssetId     String?       @db.VarChar(191)
+  maskAssetId       String?       @db.VarChar(191)
+  providerRequest   Json?
+  providerResponse  Json?
+  errorMessage      String?       @db.Text
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  conversation      Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  apiLogs           ApiUsageLog[]
+
+  @@unique([conversationId, sequence])
+  @@index([conversationId, createdAt])
+}
+
+model VideoTurn {
+  id                String        @id @default(cuid())
+  conversationId    String
+  clientRequestId   String        @db.VarChar(191)
+  sequence          Int
+  model             String        @db.VarChar(191)
+  mode              String        @db.VarChar(32)
+  prompt            String        @db.LongText
+  status            RecordStatus  @default(PENDING)
+  progress          Int           @default(0)
+  params            Json
+  referenceAssetIds Json?
+  taskId            String?       @db.VarChar(191)
+  videoId           String?       @db.VarChar(191)
+  remoteUrl         String?       @db.Text
+  outputAssetId     String?       @db.VarChar(191)
+  providerRequest   Json?
+  providerResponse  Json?
+  errorMessage      String?       @db.Text
+  completedAt       DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  conversation      Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  apiLogs           ApiUsageLog[]
+
+  @@unique([conversationId, clientRequestId])
+  @@unique([conversationId, sequence])
+  @@index([conversationId, createdAt])
+  @@index([videoId])
+}
+
+model Asset {
+  id             String        @id @default(cuid())
+  conversationId String?
+  kind           AssetKind
+  filename       String        @db.VarChar(255)
+  originalName   String?       @db.VarChar(255)
+  mimeType       String        @db.VarChar(100)
+  sizeBytes      Int
+  width          Int?
+  height         Int?
+  relativePath   String        @db.VarChar(512)
+  publicPath     String        @db.VarChar(512)
+  provider       String?       @db.VarChar(64)
+  model          String?       @db.VarChar(191)
+  remoteUrl      String?       @db.Text
+  createdAt      DateTime      @default(now())
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, kind, createdAt])
+}
+
+model ApiUsageLog {
+  id             String        @id @default(cuid())
+  conversationId String?
+  chatMessageId  String?
+  imageTurnId    String?
+  videoTurnId    String?
+  kind           ApiKind
+  model          String        @db.VarChar(191)
+  endpoint       String        @db.VarChar(191)
+  statusCode     Int?
+  requestId      String?       @db.VarChar(191)
+  durationMs     Int?
+  usage          Json?
+  errorMessage   String?       @db.Text
+  createdAt      DateTime      @default(now())
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  chatMessage    ChatMessage?  @relation(fields: [chatMessageId], references: [id], onDelete: SetNull)
+  imageTurn      ImageTurn?    @relation(fields: [imageTurnId], references: [id], onDelete: SetNull)
+  videoTurn      VideoTurn?    @relation(fields: [videoTurnId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@index([kind, createdAt])
+}
